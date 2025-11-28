@@ -5,105 +5,73 @@ import tempfile
 import os
 
 st.set_page_config(page_title="PDF → Word Full", layout="wide")
-st.title("📄 Chuyển PDF → Word (Giữ bảng + text) – NO JAVA – CHẠY CLOUD")
+st.title("📄 Chuyển PDF → Word (Text + Table) – CHẠY ĐƯỢC 100% TRÊN CLOUD")
 
 
-# =====================================================
-# HÀM: Lấy tất cả block (text + bảng) theo thứ tự
-# =====================================================
-def parse_pdf(pdf_path):
-    pages_data = []
-
-    with pdfplumber.open(pdf_path) as pdf:
-        for page in pdf.pages:
-            blocks = []
-
-            # --- TEXT BLOCKS ---
-            for obj in page.extract_words():
-                blocks.append({
-                    "type": "text",
-                    "y0": obj["top"],
-                    "content": obj["text"]
-                })
-
-            # --- TABLE BLOCKS ---
-            tables = page.extract_tables()
-            for tb in tables:
-                # estimate top position of table
-                try:
-                    y0 = page.extract_table({"vertical_strategy": "lines"})[0][0][1]
-                except:
-                    y0 = 99999
-
-                blocks.append({
-                    "type": "table",
-                    "y0": y0,
-                    "content": tb
-                })
-
-            # sort theo vị trí top
-            blocks = sorted(blocks, key=lambda x: x["y0"])
-            pages_data.append(blocks)
-
-    return pages_data
-
-
-# =====================================================
-# HÀM: GHI vào Word theo đúng thứ tự PDF
-# =====================================================
-def write_to_word(pdf_data):
+# ==============================================
+# HÀM CHUYỂN PDF → Word
+# ==============================================
+def pdf_to_word(pdf_path):
     doc = Document()
 
-    for page_idx, blocks in enumerate(pdf_data):
-        doc.add_heading(f"Trang {page_idx+1}", level=1)
+    with pdfplumber.open(pdf_path) as pdf:
+        for page_index, page in enumerate(pdf.pages):
 
-        for block in blocks:
-            if block["type"] == "text":
-                doc.add_paragraph(block["content"])
+            doc.add_heading(f"Trang {page_index + 1}", level=1)
 
-            elif block["type"] == "table":
-                table_data = block["content"]
+            # --- TEXT ---
+            text = page.extract_text()
+            if text:
+                paragraphs = text.split("\n")
+                for p in paragraphs:
+                    doc.add_paragraph(p)
 
-                if table_data and len(table_data) > 0:
+            doc.add_paragraph("")  # khoảng cách
 
-                    # tạo bảng Word
-                    table = doc.add_table(rows=len(table_data), cols=len(table_data[0]))
+            # --- TABLES ---
+            tables = page.extract_tables()
+            for tb_index, table in enumerate(tables):
+                doc.add_heading(f"Bảng {tb_index + 1}", level=2)
 
-                    for r, row in enumerate(table_data):
-                        for c, val in enumerate(row):
-                            table.rows[r].cells[c].text = str(val) if val else ""
+                row_count = len(table)
+                col_count = len(table[0])
 
-                    doc.add_paragraph("")  # khoảng cách sau bảng
+                table_doc = doc.add_table(rows=row_count, cols=col_count)
 
-        doc.add_page_break()
+                for r in range(row_count):
+                    for c in range(col_count):
+                        val = table[r][c] if table[r][c] else ""
+                        table_doc.rows[r].cells[c].text = str(val)
+
+                doc.add_paragraph("")
+
+            doc.add_page_break()
 
     return doc
 
 
-# =====================================================
+# ==============================================
 # UI
-# =====================================================
-uploaded = st.file_uploader("📤 Chọn PDF", type="pdf")
+# ==============================================
+uploaded = st.file_uploader("📤 Chọn file PDF", type="pdf")
 
 if uploaded:
-    st.success("Đã tải PDF!")
+    st.success("PDF đã tải lên!")
 
-    # Save PDF tạm
+    # Lưu PDF tạm
     temp_pdf = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
     temp_pdf.write(uploaded.read())
     temp_pdf.close()
 
     if st.button("🔄 Chuyển sang Word"):
-        with st.spinner("Đang chuyển đổi PDF → Word..."):
-            pdf_data = parse_pdf(temp_pdf.name)
-            doc = write_to_word(pdf_data)
-
+        with st.spinner("Đang xử lý PDF → Word..."):
+            doc = pdf_to_word(temp_pdf.name)
             out_path = tempfile.NamedTemporaryFile(delete=False, suffix=".docx").name
             doc.save(out_path)
 
         with open(out_path, "rb") as f:
             st.download_button(
-                "📥 Tải file Word",
+                label="📥 Tải file Word",
                 data=f,
                 file_name="converted.docx",
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
