@@ -2,9 +2,4 @@ streamlit==1.38.0
 pytesseract
 pillow
 numpy
-torch==2.2.2
-transformers==4.44.2
-accelerate
-sentencepiece
-safetensors
 
