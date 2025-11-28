@@ -1,34 +1,97 @@
 import streamlit as st
-from PIL import Image
-import pytesseract
+import tabula
+from docx import Document
+import tempfile
+import os
 
-st.set_page_config(page_title="OCR + Chatbot", layout="wide")
-st.title("📄 OCR + Chatbot Tiếng Việt (Siêu nhẹ – Streamlit Cloud)")
+st.set_page_config(page_title="PDF → Word (Giữ bảng)", layout="wide")
+st.title("📄 Chuyển PDF → Word (Giữ nguyên dữ liệu bảng)")
 
-if "ocr_text" not in st.session_state:
-    st.session_state.ocr_text = ""
+st.write("Ứng dụng chuyển PDF sang Word và giữ nguyên dữ liệu bảng (table).")
 
-uploaded = st.file_uploader("Tải ảnh (jpg/png)…", type=["jpg", "jpeg", "png"])
 
-if uploaded:
-    img = Image.open(uploaded)
-    st.image(img, use_column_width=True)
+# =====================================================================
+# FUNCTION: PDF → LIST OF DATAFRAMES
+# =====================================================================
+def extract_tables(pdf_file):
+    dfs = tabula.read_pdf(
+        pdf_file,
+        pages="all",
+        multiple_tables=True,
+        stream=True  # đọc dạng dòng, tránh gãy bảng
+    )
+    return dfs
 
-    if st.button("🔍 Chạy OCR"):
-        text = pytesseract.image_to_string(img, lang="vie")
-        st.session_state.ocr_text = text
-        st.success("OCR hoàn tất!")
-        st.text_area("📌 Văn bản OCR:", text, height=200)
 
-st.subheader("💬 Hỏi đáp dựa theo OCR")
+# =====================================================================
+# FUNCTION: WRITE TABLES TO WORD
+# =====================================================================
+def create_word_from_tables(dataframes):
+    doc = Document()
 
-def reply(ocr, q):
-    if "tiền" in q or "tien" in q:
-        return "Dữ liệu có vẻ liên quan số tiền. Đây là nội dung OCR:\n" + ocr
-    if "ngày" in q or "date" in q:
-        return "Có thể bạn đang hỏi về ngày tháng. Đây là OCR:\n" + ocr
-    return "Dựa trên OCR, mình trả lời thế này:\n" + ocr
+    for idx, df in enumerate(dataframes):
+        doc.add_heading(f"Bảng {idx + 1}", level=2)
 
-question = st.text_input("Nhập câu hỏi:")
-if st.button("🤖 Trả lời"):
-    st.write(reply(st.session_state.ocr_text, question))
+        # tạo bảng Word với số cột tương ứng
+        table = doc.add_table(rows=1, cols=len(df.columns))
+        hdr_cells = table.rows[0].cells
+
+        # header
+        for i, col in enumerate(df.columns):
+            hdr_cells[i].text = str(col)
+
+        # data rows
+        for _, row in df.iterrows():
+            row_cells = table.add_row().cells
+            for i, cell in enumerate(row):
+                row_cells[i].text = str(cell)
+
+        doc.add_paragraph("")  # thêm khoảng trắng giữa các bảng
+
+    return doc
+
+
+# =====================================================================
+# STREAMLIT UI
+# =====================================================================
+
+uploaded_file = st.file_uploader("📤 Chọn file PDF", type="pdf")
+
+if uploaded_file:
+    st.success("PDF đã tải lên!")
+
+    # lưu file tạm
+    temp_pdf = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+    temp_pdf.write(uploaded_file.read())
+    temp_pdf.close()
+
+    if st.button("🔍 Trích bảng từ PDF"):
+        with st.spinner("Đang phân tích và trích bảng..."):
+            tables = extract_tables(temp_pdf.name)
+
+        if not tables:
+            st.error("❌ Không tìm thấy bảng nào trong PDF!")
+        else:
+            st.success(f"✔ Tìm thấy {len(tables)} bảng trong PDF!")
+            
+            # hiển thị preview
+            for i, df in enumerate(tables):
+                st.subheader(f"Bảng {i+1}")
+                st.dataframe(df)
+
+            # tạo Word
+            word_doc = create_word_from_tables(tables)
+            output_path = tempfile.NamedTemporaryFile(delete=False, suffix=".docx").name
+            word_doc.save(output_path)
+
+            # download button
+            with open(output_path, "rb") as f:
+                st.download_button(
+                    label="📥 Tải file Word",
+                    data=f,
+                    file_name="output_tables.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
+
+    # cleanup
+    os.unlink(temp_pdf.name)
