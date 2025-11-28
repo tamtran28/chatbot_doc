@@ -1,83 +1,84 @@
 import streamlit as st
-import tabula
+import pdfplumber
 from docx import Document
+from PIL import Image
 import tempfile
 import os
 
-st.set_page_config(page_title="PDF → Word (Giữ bảng)", layout="wide")
-st.title("📄 Chuyển PDF → Word (GIỮ NGUYÊN DỮ LIỆU BẢNG)")
 
-st.write("Ứng dụng này trích bảng từ PDF và xuất sang Word mà không làm mất dữ liệu.")
+st.set_page_config(page_title="PDF → Word (Giữ bảng - No Java)", layout="wide")
+st.title("📄 Chuyển PDF → Word (Giữ dữ liệu bảng) – NO JAVA")
 
 
-# ===============================================
-# TRÍCH BẢNG PDF
-# ===============================================
+# ============================================
+# FUNCTION: Extract tables manually
+# ============================================
 def extract_tables(pdf_path):
-    dfs = tabula.read_pdf(
-        pdf_path,
-        pages="all",
-        multiple_tables=True,
-        stream=True  # đọc theo dòng giữ bảng chính xác hơn
-    )
-    return dfs
+    tables = []
+
+    with pdfplumber.open(pdf_path) as pdf:
+        for page in pdf.pages:
+            extracted = page.extract_tables()
+
+            for table in extracted:
+                tables.append(table)
+
+    return tables
 
 
-# ===============================================
-# TẠO WORD TỪ CÁC BẢNG
-# ===============================================
-def create_word_from_tables(dfs):
+# ============================================
+# FUNCTION: Convert to Word
+# ============================================
+def create_word_from_tables(tables):
     doc = Document()
 
-    for idx, df in enumerate(dfs):
-        doc.add_heading(f"Bảng {idx+1}", level=2)
+    for index, table in enumerate(tables):
+        doc.add_heading(f"Bảng {index + 1}", level=2)
 
-        table = doc.add_table(rows=1, cols=len(df.columns))
-        hdr_cells = table.rows[0].cells
+        rows = len(table)
+        cols = len(table[0])
 
-        # Header
-        for i, col in enumerate(df.columns):
-            hdr_cells[i].text = str(col)
+        word_table = doc.add_table(rows=rows, cols=cols)
 
-        # Data rows
-        for _, row in df.iterrows():
-            row_cells = table.add_row().cells
-            for i, cell in enumerate(row):
-                row_cells[i].text = str(cell)
+        for r in range(rows):
+            for c in range(cols):
+                cell_text = table[r][c] if table[r][c] else ""
+                word_table.rows[r].cells[c].text = cell_text
 
-        doc.add_paragraph("")  # khoảng trắng
+        doc.add_paragraph("")
 
     return doc
 
 
-# ===============================================
+# ============================================
 # UI
-# ===============================================
-
-uploaded = st.file_uploader("📤 Tải file PDF", type="pdf")
+# ============================================
+uploaded = st.file_uploader("📤 Chọn file PDF", type="pdf")
 
 if uploaded:
-    st.success("PDF đã tải lên!")
+    st.success("PDF đã tải thành công!")
 
+    # Save PDF temp
     temp_pdf = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
     temp_pdf.write(uploaded.read())
     temp_pdf.close()
 
     if st.button("🔍 Trích bảng"):
-        with st.spinner("Đang phân tích PDF…"):
+        with st.spinner("Đang trích bảng..."):
+
             tables = extract_tables(temp_pdf.name)
 
         if not tables:
-            st.error("❌ Không tìm thấy bảng nào trong PDF!")
+            st.error("❌ Không có bảng nào trong PDF.")
         else:
             st.success(f"✔ Tìm thấy {len(tables)} bảng!")
 
-            # Hiển thị preview
-            for i, df in enumerate(tables):
+            # preview
+            for i, table in enumerate(tables):
                 st.subheader(f"Bảng {i+1}")
-                st.dataframe(df)
+                st.table(table)
 
-            # Tạo Word file
+            # convert to Word
             doc = create_word_from_tables(tables)
             output_path = tempfile.NamedTemporaryFile(delete=False, suffix=".docx").name
             doc.save(output_path)
@@ -85,8 +86,8 @@ if uploaded:
             with open(output_path, "rb") as f:
                 st.download_button(
                     "📥 Tải file Word",
-                    f,
-                    file_name="tables_output.docx",
+                    data=f,
+                    file_name="output_tables.docx",
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 )
 
