@@ -1,6 +1,7 @@
 streamlit
+easyocr
 pillow
-paddleocr
-paddlepaddle
-llama-cpp-python
 numpy
+llama-cpp-python
+torch
+opencv-python-headless
