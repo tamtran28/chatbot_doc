@@ -1,12 +1,12 @@
 streamlit==1.38.0
-easyocr==1.7.1
+pytesseract
 pillow
 numpy
-opencv-python-headless
 transformers==4.44.2
-sentencepiece
 accelerate
+sentencepiece
 safetensors
 torch==2.2.2
+
 
 
