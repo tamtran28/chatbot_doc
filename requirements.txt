@@ -1,7 +1,7 @@
-streamlit
+streamlit==1.38.0
 pillow
 numpy
 opencv-python-headless
-paddlepaddle-gpu==2.5.2
-paddleocr
-llama-cpp-python[cuda]
+paddleocr==2.7.0.3
+paddlepaddle==2.5.2
+llama-cpp-python==0.2.86
