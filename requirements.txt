@@ -1,7 +1,7 @@
 streamlit
-easyocr
 pillow
 numpy
-llama-cpp-python
-torch
 opencv-python-headless
+paddlepaddle-gpu==2.5.2
+paddleocr
+llama-cpp-python[cuda]
