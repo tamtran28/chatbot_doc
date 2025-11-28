@@ -1,4 +1,4 @@
 streamlit==1.38.0
-tabula-py
+pdfplumber
 python-docx
 pillow
