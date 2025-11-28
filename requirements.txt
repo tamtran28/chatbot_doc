@@ -1,0 +1,6 @@
+streamlit
+pillow
+paddleocr
+paddlepaddle
+llama-cpp-python
+numpy
