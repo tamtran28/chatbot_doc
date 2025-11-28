@@ -6,125 +6,104 @@ import easyocr
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
 
-# =========================
-# 1. CONFIG STREAMLIT
-# =========================
+# ============================
+# CONFIG
+# ============================
 st.set_page_config(
-    page_title="OCR + LLM Chatbot (Tiếng Việt - Offline)",
+    page_title="OCR + Chatbot (Tiếng Việt - Streamlit Cloud)",
     layout="wide"
 )
 
-st.title("📄 OCR + 🤖 Chatbot LLM (Tiếng Việt - Offline/Free)")
-st.write("Upload ảnh → OCR → hỏi AI dựa trên nội dung trong ảnh.")
+st.title("📄 OCR + 🤖 Chatbot Tiếng Việt (Streamlit Cloud - CPU)")
 
 
-# =========================
-# 2. LOAD OCR
-# =========================
+# ============================
+# LOAD MODELS (CACHED)
+# ============================
 @st.cache_resource
 def load_ocr():
-    return easyocr.Reader(["vi", "en"], gpu=torch.cuda.is_available())
+    return easyocr.Reader(["vi", "en"], gpu=False)
 
 reader = load_ocr()
 
 
-# =========================
-# 3. LOAD LLM (Qwen2.5-1.5B)
-# =========================
 @st.cache_resource
 def load_llm():
-    model_name = "Qwen/Qwen2.5-1.5B-Instruct"
-
-    dtype = torch.float16 if torch.cuda.is_available() else torch.float32
-
+    model_name = "Qwen/Qwen2.5-0.5B-Instruct"
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
-        torch_dtype=dtype,
-        device_map="auto"  # GPU nếu có
+        torch_dtype=torch.float32,
+        device_map="cpu"
     )
-
     return tokenizer, model
 
 tokenizer, model = load_llm()
 
 
-# =========================
-# 4. SINH TRẢ LỜI TỪ LLM
-# =========================
-def answer_llm(ocr_text: str, question: str):
-    device = model.device
-
-    system_prompt = (
-        "Bạn là trợ lý AI hiểu tiếng Việt. "
-        "Chỉ dựa vào văn bản OCR được cung cấp, hãy trả lời chính xác – ngắn gọn – rõ ràng."
-    )
+# ============================
+# GEN ANSWER
+# ============================
+def generate_answer(ocr_text, question):
+    device = "cpu"
 
     prompt = f"""
-<|system|>
-{system_prompt}
-</s>
-<|user|>
-Văn bản OCR:
+Bạn là trợ lý AI hiểu tiếng Việt.
+
+Dưới đây là văn bản OCR lấy từ ảnh:
 
 {ocr_text}
 
 Câu hỏi: {question}
-</s>
-<|assistant|>
+
+Hãy trả lời ngắn gọn, chính xác.
 """
 
     inputs = tokenizer(prompt, return_tensors="pt").to(device)
 
-    with torch.no_grad():
-        outputs = model.generate(
-            **inputs,
-            max_new_tokens=256,
-            do_sample=False,
-            temperature=0.2,
-            pad_token_id=tokenizer.eos_token_id
-        )
+    outputs = model.generate(
+        **inputs,
+        max_new_tokens=200,
+        do_sample=False,
+        temperature=0.3,
+        pad_token_id=tokenizer.eos_token_id
+    )
 
-    text = tokenizer.decode(outputs[0], skip_special_tokens=True)
-    return text.split("assistant", 1)[-1].strip()
-
-
-# =========================
-# 5. UI
-# =========================
-
-if "ocr_text" not in st.session_state:
-    st.session_state.ocr_text = ""
+    answer = tokenizer.decode(outputs[0], skip_special_tokens=True)
+    return answer
 
 
-# Upload ảnh
-st.subheader("1️⃣ Upload ảnh để OCR")
-uploaded_file = st.file_uploader("Chọn ảnh...", type=["jpg", "jpeg", "png"])
+# ============================
+# UI
+# ============================
+if "ocr" not in st.session_state:
+    st.session_state.ocr = ""
 
-if uploaded_file:
-    img = Image.open(uploaded_file).convert("RGB")
+uploaded = st.file_uploader("Tải ảnh (jpg/png)", type=["jpg", "jpeg", "png"])
+
+if uploaded:
+    img = Image.open(uploaded)
     st.image(img, use_column_width=True)
 
     if st.button("🔍 Chạy OCR"):
-        with st.spinner("Đang chạy OCR..."):
-            ocr_result = reader.readtext(np.array(img))
-            txt = "\n".join([r[1] for r in ocr_result])
-            st.session_state.ocr_text = txt
+        with st.spinner("Đang chạy OCR…"):
+            result = reader.readtext(np.array(img))
+            text = "\n".join([r[1] for r in result])
+            st.session_state.ocr = text
 
-        st.success("Hoàn tất OCR!")
-        st.text_area("📌 Kết quả OCR:", txt, height=200)
+        st.text_area("Văn bản OCR:", text, height=200)
 
 
-# Chatbot
-st.subheader("2️⃣ Hỏi AI dựa trên văn bản OCR")
+st.subheader("💬 Hỏi AI")
 
-if not st.session_state.ocr_text:
+if not st.session_state.ocr:
     st.info("Hãy upload ảnh và chạy OCR trước.")
 else:
-    q = st.text_input("Nhập câu hỏi:")
-    if st.button("🤖 Trả lời"):
-        with st.spinner("AI đang suy nghĩ..."):
-            ans = answer_llm(st.session_state.ocr_text, q)
+    query = st.text_input("Nhập câu hỏi:")
 
-        st.markdown("### 💡 Trả lời:")
-        st.write(ans)
+    if st.button("🤖 Trả lời"):
+        with st.spinner("AI đang xử lý…"):
+            answer = generate_answer(st.session_state.ocr, query)
+
+        st.write("### 🧠 Trả lời:")
+        st.write(answer)
