@@ -1,101 +1,130 @@
 import streamlit as st
 from PIL import Image
 import numpy as np
-from paddleocr import PaddleOCR
-from llama_cpp import Llama
+import torch
+import easyocr
+from transformers import AutoTokenizer, AutoModelForCausalLM
 
-# ===========================
-# STREAMLIT PAGE CONFIG
-# ===========================
+
+# =========================
+# 1. CONFIG STREAMLIT
+# =========================
 st.set_page_config(
-    page_title="OCR + LLM Chatbot (HF Spaces)",
+    page_title="OCR + LLM Chatbot (Tiếng Việt - Offline)",
     layout="wide"
 )
 
-st.title("📄 OCR + 🤖 Chatbot (LLM Offline – HuggingFace Spaces)")
+st.title("📄 OCR + 🤖 Chatbot LLM (Tiếng Việt - Offline/Free)")
+st.write("Upload ảnh → OCR → hỏi AI dựa trên nội dung trong ảnh.")
 
-# ===========================
-# LOAD MODELS WITH CACHE
-# ===========================
-@st.cache_resource
-def load_ocr_model():
-    return PaddleOCR(use_angle_cls=True, lang="vi")
 
+# =========================
+# 2. LOAD OCR
+# =========================
 @st.cache_resource
-def load_llm_model():
-    return Llama(
-        model_path="models/Phi-3-mini-4k-instruct.Q4_K_M.gguf",  
-        n_ctx=2048,
-        n_threads=4,   # HF Spaces CPU typically = 2–4 threads
-        verbose=False
+def load_ocr():
+    return easyocr.Reader(["vi", "en"], gpu=torch.cuda.is_available())
+
+reader = load_ocr()
+
+
+# =========================
+# 3. LOAD LLM (Qwen2.5-1.5B)
+# =========================
+@st.cache_resource
+def load_llm():
+    model_name = "Qwen/Qwen2.5-1.5B-Instruct"
+
+    dtype = torch.float16 if torch.cuda.is_available() else torch.float32
+
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = AutoModelForCausalLM.from_pretrained(
+        model_name,
+        torch_dtype=dtype,
+        device_map="auto"  # GPU nếu có
     )
 
-ocr = load_ocr_model()
-llm = load_llm_model()
+    return tokenizer, model
+
+tokenizer, model = load_llm()
 
 
-# ===========================
-# FRONTEND – UPLOAD IMAGE
-# ===========================
-uploaded_file = st.file_uploader(
-    "📤 Tải ảnh hóa đơn / giấy tờ (jpg, png)", 
-    type=["jpg", "jpeg", "png"]
-)
+# =========================
+# 4. SINH TRẢ LỜI TỪ LLM
+# =========================
+def answer_llm(ocr_text: str, question: str):
+    device = model.device
+
+    system_prompt = (
+        "Bạn là trợ lý AI hiểu tiếng Việt. "
+        "Chỉ dựa vào văn bản OCR được cung cấp, hãy trả lời chính xác – ngắn gọn – rõ ràng."
+    )
+
+    prompt = f"""
+<|system|>
+{system_prompt}
+</s>
+<|user|>
+Văn bản OCR:
+
+{ocr_text}
+
+Câu hỏi: {question}
+</s>
+<|assistant|>
+"""
+
+    inputs = tokenizer(prompt, return_tensors="pt").to(device)
+
+    with torch.no_grad():
+        outputs = model.generate(
+            **inputs,
+            max_new_tokens=256,
+            do_sample=False,
+            temperature=0.2,
+            pad_token_id=tokenizer.eos_token_id
+        )
+
+    text = tokenizer.decode(outputs[0], skip_special_tokens=True)
+    return text.split("assistant", 1)[-1].strip()
+
+
+# =========================
+# 5. UI
+# =========================
 
 if "ocr_text" not in st.session_state:
     st.session_state.ocr_text = ""
 
 
-# ===========================
-# OCR PROCESSING
-# ===========================
+# Upload ảnh
+st.subheader("1️⃣ Upload ảnh để OCR")
+uploaded_file = st.file_uploader("Chọn ảnh...", type=["jpg", "jpeg", "png"])
+
 if uploaded_file:
-    img = Image.open(uploaded_file)
-    st.image(img, caption="🖼 Ảnh đã upload", use_column_width=True)
+    img = Image.open(uploaded_file).convert("RGB")
+    st.image(img, use_column_width=True)
 
-    st.write("🔍 Đang chạy OCR... vui lòng chờ")
+    if st.button("🔍 Chạy OCR"):
+        with st.spinner("Đang chạy OCR..."):
+            ocr_result = reader.readtext(np.array(img))
+            txt = "\n".join([r[1] for r in ocr_result])
+            st.session_state.ocr_text = txt
 
-    result = ocr.ocr(np.array(img), cls=True)
-
-    text = "\n".join([line[1][0] for line in result[0]])
-    st.session_state.ocr_text = text
-
-    st.subheader("📌 Kết quả OCR:")
-    st.write(text)
-
-    st.divider()
+        st.success("Hoàn tất OCR!")
+        st.text_area("📌 Kết quả OCR:", txt, height=200)
 
 
-# ===========================
-# CHATBOT QA USING OFFLINE LLM
-# ===========================
-if st.session_state.ocr_text:
-    st.subheader("💬 Hỏi AI về nội dung OCR")
+# Chatbot
+st.subheader("2️⃣ Hỏi AI dựa trên văn bản OCR")
 
-    query = st.text_input("Nhập câu hỏi:")
-
-    if query:
-        prompt = f"""
-Bạn là trợ lý AI thông minh.
-Dưới đây là văn bản OCR trích từ ảnh:
-
-{text}
-
-Câu hỏi: {query}
-
-Hãy trả lời chi tiết và chính xác.
-"""
-
-        output = llm(
-            prompt,
-            max_tokens=256,
-            temperature=0.1
-        )
-
-        answer = output["choices"][0]["text"]
-
-        st.subheader("🤖 Trả lời:")
-        st.write(answer)
-
+if not st.session_state.ocr_text:
+    st.info("Hãy upload ảnh và chạy OCR trước.")
 else:
-    st.info("⬆️ Hãy upload ảnh để bắt đầu OCR.")
+    q = st.text_input("Nhập câu hỏi:")
+    if st.button("🤖 Trả lời"):
+        with st.spinner("AI đang suy nghĩ..."):
+            ans = answer_llm(st.session_state.ocr_text, q)
+
+        st.markdown("### 💡 Trả lời:")
+        st.write(ans)
