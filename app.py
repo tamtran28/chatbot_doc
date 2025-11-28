@@ -1,17 +1,24 @@
 import streamlit as st
-from PIL import Image
 import pytesseract
+from PIL import Image
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
 
-st.set_page_config(page_title="OCR + Chatbot (Streamlit Cloud)", layout="wide")
-st.title("📄 OCR + 🤖 Chatbot Tiếng Việt (Streamlit Cloud • No GPU)")
+# =====================================================
+# STREAMLIT CONFIG
+# =====================================================
+st.set_page_config(
+    page_title="OCR + Chatbot Tiếng Việt (Streamlit Cloud)",
+    layout="wide"
+)
+
+st.title("📄 OCR + 🤖 Chatbot Tiếng Việt (Streamlit Cloud – CPU)")
 
 
-# ==================================================
-# Load LLM
-# ==================================================
+# =====================================================
+# LOAD LLM: Qwen2.5-0.5B-Instruct (CHẠY ĐƯỢC TRÊN CLOUD)
+# =====================================================
 @st.cache_resource
 def load_llm():
     model_name = "Qwen/Qwen2.5-0.5B-Instruct"
@@ -29,21 +36,21 @@ def load_llm():
 tokenizer, model = load_llm()
 
 
-# ==================================================
-# LLM Answer Function
-# ==================================================
-def ask_llm(ocr_text, question):
+# =====================================================
+# FUNCTION: GENERATE ANSWER
+# =====================================================
+def ask_ai(ocr_text, question):
 
     prompt = f"""
-Bạn là một trợ lý AI thông minh và giỏi tiếng Việt.
+Bạn là trợ lý AI tiếng Việt.
 
-Dưới đây là văn bản OCR được trích xuất từ hình ảnh:
+Văn bản OCR được trích xuất từ hình ảnh:
 
 {ocr_text}
 
 Câu hỏi: {question}
 
-Hãy trả lời rõ ràng và chính xác.
+Hãy trả lời chính xác và dễ hiểu.
 """
 
     inputs = tokenizer(prompt, return_tensors="pt")
@@ -51,46 +58,53 @@ Hãy trả lời rõ ràng và chính xác.
     outputs = model.generate(
         **inputs,
         max_new_tokens=200,
-        temperature=0.3,
         do_sample=False,
+        temperature=0.2,
         pad_token_id=tokenizer.eos_token_id
     )
 
-    answer = tokenizer.decode(outputs[0], skip_special_tokens=True)
-    return answer
+    return tokenizer.decode(outputs[0], skip_special_tokens=True)
 
 
-# ==================================================
+# =====================================================
 # UI
-# ==================================================
-uploaded = st.file_uploader("Tải ảnh (jpg/png)", type=["jpg", "jpeg", "png"])
+# =====================================================
+
+uploaded = st.file_uploader("📤 Tải ảnh (jpg/png)…", type=["jpg", "jpeg", "png"])
 
 if "ocr" not in st.session_state:
     st.session_state.ocr = ""
 
 
+# -----------------------------
+# OCR BLOCK (TESSERACT)
+# -----------------------------
 if uploaded:
     img = Image.open(uploaded)
-    st.image(img, use_column_width=True)
+    st.image(img, caption="Ảnh đã tải lên", use_column_width=True)
 
     if st.button("🔍 Chạy OCR"):
-        with st.spinner("Đang OCR…"):
+        with st.spinner("Đang chạy OCR…"):
             text = pytesseract.image_to_string(img, lang="vie")
             st.session_state.ocr = text
 
-        st.text_area("📌 Văn bản OCR:", st.session_state.ocr, height=200)
+        st.success("OCR hoàn tất!")
+        st.text_area("📌 Văn bản OCR:", text, height=200)
 
 
-st.subheader("💬 Hỏi AI dựa trên nội dung OCR")
+# -----------------------------
+# CHATBOT BLOCK
+# -----------------------------
+st.subheader("💬 Chatbot hỏi đáp dựa trên nội dung OCR")
 
 if not st.session_state.ocr:
-    st.info("Hãy upload ảnh và chạy OCR trước.")
+    st.info("⚠️ Hãy tải ảnh và chạy OCR trước.")
 else:
-    query = st.text_input("Nhập câu hỏi:")
+    q = st.text_input("Nhập câu hỏi:")
 
     if st.button("🤖 Trả lời"):
         with st.spinner("AI đang xử lý…"):
-            answer = ask_llm(st.session_state.ocr, query)
+            answer = ask_ai(st.session_state.ocr, q)
 
         st.write("### 🧠 Trả lời:")
         st.write(answer)
