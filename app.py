@@ -1,77 +1,101 @@
 import streamlit as st
 from PIL import Image
+import numpy as np
 from paddleocr import PaddleOCR
 from llama_cpp import Llama
-import numpy as np
 
-st.set_page_config(page_title="OCR + LLM GPU", layout="wide")
-st.title("📄 OCR + 🤖 Chatbot (GPU T4)")
+# ===========================
+# STREAMLIT PAGE CONFIG
+# ===========================
+st.set_page_config(
+    page_title="OCR + LLM Chatbot (HF Spaces)",
+    layout="wide"
+)
 
-# -----------------------------
-# CACHE LOAD MODELS (GPU)
-# -----------------------------
+st.title("📄 OCR + 🤖 Chatbot (LLM Offline – HuggingFace Spaces)")
+
+# ===========================
+# LOAD MODELS WITH CACHE
+# ===========================
 @st.cache_resource
-def load_llm():
+def load_ocr_model():
+    return PaddleOCR(use_angle_cls=True, lang="vi")
+
+@st.cache_resource
+def load_llm_model():
     return Llama(
-        model_path="models/Phi-3-mini-4k-instruct.Q4_K_M.gguf",
-        n_gpu_layers=60,
+        model_path="models/Phi-3-mini-4k-instruct.Q4_K_M.gguf",  
         n_ctx=2048,
+        n_threads=4,   # HF Spaces CPU typically = 2–4 threads
         verbose=False
     )
 
-@st.cache_resource
-def load_ocr():
-    return PaddleOCR(use_angle_cls=True, lang="vi")  # GPU tự động bật trên HF
+ocr = load_ocr_model()
+llm = load_llm_model()
 
-llm = load_llm()
-ocr_model = load_ocr()
 
-# -----------------------------
-# UI
-# -----------------------------
-uploaded_file = st.file_uploader("Upload image", type=["jpg","jpeg","png"])
+# ===========================
+# FRONTEND – UPLOAD IMAGE
+# ===========================
+uploaded_file = st.file_uploader(
+    "📤 Tải ảnh hóa đơn / giấy tờ (jpg, png)", 
+    type=["jpg", "jpeg", "png"]
+)
 
 if "ocr_text" not in st.session_state:
     st.session_state.ocr_text = ""
 
-# -----------------------------
-# OCR
-# -----------------------------
+
+# ===========================
+# OCR PROCESSING
+# ===========================
 if uploaded_file:
     img = Image.open(uploaded_file)
-    st.image(img, caption="Ảnh tải lên", use_column_width=True)
+    st.image(img, caption="🖼 Ảnh đã upload", use_column_width=True)
 
-    st.write("🔍 Đang chạy OCR...")
-    result = ocr_model.ocr(np.array(img), cls=True)
+    st.write("🔍 Đang chạy OCR... vui lòng chờ")
+
+    result = ocr.ocr(np.array(img), cls=True)
 
     text = "\n".join([line[1][0] for line in result[0]])
     st.session_state.ocr_text = text
 
-    st.subheader("📌 Text OCR:")
+    st.subheader("📌 Kết quả OCR:")
     st.write(text)
+
     st.divider()
 
-# -----------------------------
-# CHATBOT
-# -----------------------------
+
+# ===========================
+# CHATBOT QA USING OFFLINE LLM
+# ===========================
 if st.session_state.ocr_text:
+    st.subheader("💬 Hỏi AI về nội dung OCR")
+
     query = st.text_input("Nhập câu hỏi:")
 
     if query:
         prompt = f"""
-Dựa trên văn bản OCR sau:
+Bạn là trợ lý AI thông minh.
+Dưới đây là văn bản OCR trích từ ảnh:
 
 {text}
 
-Trả lời câu hỏi: {query}
+Câu hỏi: {query}
 
-Trả lời:
+Hãy trả lời chi tiết và chính xác.
 """
 
-        output = llm(prompt, max_tokens=200)
+        output = llm(
+            prompt,
+            max_tokens=256,
+            temperature=0.1
+        )
+
         answer = output["choices"][0]["text"]
 
-        st.write("### 🤖 Trả lời:")
+        st.subheader("🤖 Trả lời:")
         st.write(answer)
+
 else:
-    st.info("Hãy upload ảnh để OCR.")
+    st.info("⬆️ Hãy upload ảnh để bắt đầu OCR.")
